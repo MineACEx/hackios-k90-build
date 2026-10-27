@@ -42,24 +42,48 @@ jobs:
           cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -20 || true
 
       - name: Install deps (base)
-        timeout-minutes: 12
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio
-
-      - name: Install deps (toolchain)
-        timeout-minutes: 18
-        run: |
-          # 小包一批
+          # runner 自带索引，先试不 update 直接装；失败才 update
+          set +e
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            python3 python3-pip python-is-python3 perl flex bison m4 \
-            autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 \
-            uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4 || true
-          # clang/lld 单独一批，失败重试
-          for i in 1 2 3; do
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang lld && break
-            echo "clang/lld install attempt $i failed, retry"; sleep 8
-          done
+            git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio 2>&1 | tail -5
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            echo "direct install failed (rc=$rc), running apt-get update with Azure mirror"
+            sudo sed -i 's|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g; s|http://security.ubuntu.com|http://azure.archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources || true
+            sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=15 2>&1 | tail -3
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio
+          fi
+          set -e
+
+      - name: Install deps (toolchain, skip if present)
+        timeout-minutes: 15
+        run: |
+          need=""
+          command -v dtc >/dev/null 2>&1 || need="$need device-tree-compiler"
+          command -v 7z >/dev/null 2>&1 || need="$need p7zip-full"
+          command -v python3 >/dev/null 2>&1 || need="$need python3"
+          command -v lz4 >/dev/null 2>&1 || need="$need lz4"
+          command -v flex >/dev/null 2>&1 || need="$need flex"
+          command -v bison >/dev/null 2>&1 || need="$need bison"
+          dpkg -s uuid-dev >/dev/null 2>&1 || need="$need uuid-dev"
+          dpkg -s libncurses-dev >/dev/null 2>&1 || need="$need libncurses-dev"
+          echo "missing pkgs:$need"
+          if [ -n "$need" ]; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $need || {
+              echo "install failed, retry after update"
+              sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=15 | tail -3
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $need
+            }
+          else
+            echo "all deps already present"
+          fi
+          # clang/lld: runner 预装，只确认存在
+          if ! command -v clang >/dev/null 2>&1; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang lld
+          fi
 
       - name: Show toolchain versions
         run: |
