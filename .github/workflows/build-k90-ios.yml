@@ -154,33 +154,37 @@ jobs:
           find . -name "mach.development.bcm2837" -exec ls -la {} \;
           find . -name "mach.development.bcm2837" -exec sha256sum {} \;
 
-      - name: Build xnuloader (QEMU loader)
+      - name: Build loader-phone.efi (REDMI K90)
         if: inputs.stage == 'loader' || inputs.stage == 'all'
         timeout-minutes: 20
         working-directory: work/hackios-xnu-kernel
         run: |
           # lld-link 装在 /usr/lib/llvm-NN/bin，不在默认 PATH
           LLD_DIR=$(dirname "$(ls /usr/lib/llvm-*/bin/lld-link 2>/dev/null | head -1)")
-          echo "lld dir: $LLD_DIR"
           if [ -n "$LLD_DIR" ]; then
             sudo ln -sf "$LLD_DIR/lld-link" /usr/local/bin/lld-link
             sudo ln -sf "$LLD_DIR/clang" /usr/local/bin/clang 2>/dev/null || true
           fi
           export PATH="/usr/local/bin:$PATH"
-          echo "=== lld-link ==="
-          command -v lld-link && lld-link --version
-          echo "=== 构建 loader（QEMU 版，无 DIRECT_PHONE_PLAT）==="
-          BUILD_ID=k90-qemu bash xnuloader/build.sh
+          lld-link --version
+          # 手机版：DIRECT_PHONE_PLAT 让 loader 选中 platform_annibale
+          # BUILD_ID 必须是 40 位小写十六进制
+          BID=$(git -C ../hackios-xnu-kernel rev-parse HEAD 2>/dev/null || echo "")
+          if ! echo "$BID" | grep -qE '^[0-9a-f]{40}$'; then
+            BID=$(echo -n "$GITHUB_SHA" | sha1sum | cut -d" " -f1)
+          fi
+          echo "BUILD_ID=$BID"
+          EXTRA_CFLAGS=-DDIRECT_PHONE_PLAT BUILD_ID="$BID" bash xnuloader/build.sh
           echo "=== 产物 ==="
-          find . -name "loader*.efi" -exec ls -la {} \;
-          find . -name "loader*.efi" -exec sha256sum {} \;
+          ls -la xnuloader/loader-phone.efi
+          sha256sum xnuloader/loader-phone.efi
 
-      - name: Upload loader
-        if: (inputs.stage == 'loader' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnuloader/*.efi') != ''
+      - name: Upload phone loader
+        if: (inputs.stage == 'loader' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnuloader/loader-phone.efi') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: xnuloader-efi
-          path: work/hackios-xnu-kernel/xnuloader/*.efi
+          name: k90-loader-phone
+          path: work/hackios-xnu-kernel/xnuloader/loader-phone.efi
           if-no-files-found: warn
           compression-level: 0
 
@@ -236,6 +240,37 @@ jobs:
         with:
           name: userland-apfs
           path: work/hackios-xnu-kernel/userland/*.apfs
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Build payload.bin for phone
+        if: success() && hashFiles('work/hackios-xnu-kernel/userland/system.apfs') != ''
+        timeout-minutes: 15
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          K=xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
+          [ -f "$K" ] || { echo "kernel missing: $K"; exit 1; }
+          SYS=userland/system.apfs
+          ROOT=userland/root.apfs
+          [ -f "$SYS" ] || [ -f "$ROOT" ] || { echo "apfs missing"; exit 1; }
+          RDRES=$(printf '%x' "$(stat -c %s "$SYS")")
+          echo "rdres=0x$RDRES"
+          mkdir -p out
+          python3 xnuloader/mkpayload.py -o out/payload.bin \
+            kernel="$K" ramdisk="$ROOT" \
+            --rdres "$RDRES" \
+            --cmdline "loader_return_after=1200 epoch=$(date +%s) touchscreen=2 cpus=8 buttons=1 battery=1 gl=1 adreno8=23"
+          ls -la out/payload.bin
+          sha256sum out/payload.bin
+
+      - name: Upload phone bundle
+        if: success() && hashFiles('work/hackios-xnu-kernel/out/payload.bin') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: k90-phone-bundle
+          path: |
+            work/hackios-xnu-kernel/xnuloader/loader-phone.efi
+            work/hackios-xnu-kernel/out/payload.bin
           if-no-files-found: warn
           compression-level: 0
 
