@@ -38,13 +38,29 @@ jobs:
           df -h /
           free -h
           nproc
+          cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -20 || true
 
-      - name: Install deps
+      - name: Install deps (base)
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make clang lld llvm python3 python3-pip python-is-python3 perl flex bison m4 autoconf automake libtool pkg-config gawk file unzip zstd libzstd-dev bzip2 zip binutils uuid-dev libssl-dev libxml2-dev libbz2-dev liblzma-dev libncurses-dev device-tree-compiler p7zip-full lz4 cpio patch
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio
+
+      - name: Install deps (toolchain)
+        timeout-minutes: 20
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang lld llvm python3 python3-pip python-is-python3 perl flex bison m4 autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 uuid-dev libssl-dev libxml2-dev libbz2-dev liblzma-dev libncurses-dev device-tree-compiler p7zip-full lz4
+
+      - name: Show toolchain versions
+        run: |
+          clang --version | head -2
+          ld.lld --version
+          python3 --version
+          7z | head -3 || true
 
       - name: Clone workspace
+        timeout-minutes: 15
         run: |
           git clone --recurse-submodules https://github.com/iola1999/hackios-redmi-k90-annibale.git work
           cd work && git submodule status
+          ls -la
