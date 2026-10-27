@@ -13,9 +13,38 @@ on:
           - userland
           - all
 
+concurrency:
+  group: k90-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 350
     steps:
-      - name: hello
-        run: echo "registered, stage=${{ inputs.stage }}"
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Show disk
+        run: |
+          df -h /
+          free -h
+          nproc
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make clang lld llvm python3 python3-pip python-is-python3 perl flex bison m4 autoconf automake libtool pkg-config gawk file unzip zstd libzstd-dev bzip2 zip binutils uuid-dev libssl-dev libxml2-dev libbz2-dev liblzma-dev libncurses-dev device-tree-compiler p7zip-full lz4 cpio patch
+
+      - name: Clone workspace
+        run: |
+          git clone --recurse-submodules https://github.com/iola1999/hackios-redmi-k90-annibale.git work
+          cd work && git submodule status
