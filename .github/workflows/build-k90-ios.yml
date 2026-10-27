@@ -46,17 +46,34 @@ jobs:
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio
 
-      - name: Install deps (toolchain)
-        timeout-minutes: 20
+      - name: Install deps (toolchain, minimal)
+        timeout-minutes: 10
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang lld llvm python3 python3-pip python-is-python3 perl flex bison m4 autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 uuid-dev libssl-dev libxml2-dev libbz2-dev liblzma-dev libncurses-dev device-tree-compiler p7zip-full lz4
+          # runner 预装 clang16/17/18 + llvm，不重复安装大包
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3 python3-pip python-is-python3 perl flex bison m4 \
+            autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 \
+            uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4 || {
+              echo "apt install failed, retry once"; sleep 5;
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                python3 python3-pip python-is-python3 perl flex bison m4 \
+                autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 \
+                uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4;
+            }
 
       - name: Show toolchain versions
         run: |
-          clang --version | head -2
-          ld.lld --version
+          echo "=== clang (runner preinstalled) ==="
+          clang --version | head -3
+          echo "=== lld ==="
+          (ld.lld --version || lld --version || echo "no lld in PATH") 2>&1 | head -3
+          ls /usr/lib/llvm-*/bin/ld.lld 2>/dev/null | head -5 || true
+          echo "=== python ==="
           python3 --version
-          7z | head -3 || true
+          echo "=== 7z ==="
+          (7z | head -3) || echo "7z missing"
+          echo "=== dtc ==="
+          (dtc --version || echo "dtc missing") 2>&1 | head -2
 
       - name: Clone workspace
         timeout-minutes: 15
