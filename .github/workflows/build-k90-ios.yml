@@ -141,6 +141,7 @@ jobs:
           bash xnu-deps/setup.sh
 
       - name: Build XNU
+        if: inputs.stage == 'kernel' || inputs.stage == 'all'
         timeout-minutes: 120
         working-directory: work/hackios-xnu-kernel
         run: |
@@ -150,10 +151,63 @@ jobs:
           find . -name "mach.development.bcm2837" -exec sha256sum {} \;
 
       - name: Upload kernel
-        if: always()
+        if: (inputs.stage == 'kernel' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837') != ''
         uses: actions/upload-artifact@v4
         with:
           name: kernel-mach-bcm2837
           path: work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837
           if-no-files-found: warn
           compression-level: 0
+
+      - name: Merge userland overlay
+        if: inputs.stage == 'userland' || inputs.stage == 'all'
+        timeout-minutes: 12
+        working-directory: work/hackios-xnu-kernel
+        env:
+          USERLAND_URL: https://github.com/iola1999/hackios-xnu-userland.git
+          USERLAND_REF: k90-port
+        run: |
+          bash common/setup.sh
+          echo "=== overlay check ==="
+          ls -la userland/build.sh || { echo "userland/build.sh missing"; exit 1; }
+          ls -la ios165/fetch.sh || { echo "ios165/fetch.sh missing"; exit 1; }
+
+      - name: Fetch iOS 16.5 from Apple CDN
+        if: inputs.stage == 'userland' || inputs.stage == 'all'
+        timeout-minutes: 60
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          df -h /
+          bash ios165/fetch.sh
+          df -h /
+          echo "=== extracted ==="
+          ls -la ios165/ 2>/dev/null | head -20
+          du -sh ios165/* 2>/dev/null | head -10
+
+      - name: Build userland APFS
+        if: inputs.stage == 'userland' || inputs.stage == 'all'
+        timeout-minutes: 90
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          df -h /
+          bash userland/build.sh
+          echo "=== apfs ==="
+          find . -name "*.apfs" -exec ls -la {} \;
+          find . -name "*.apfs" -exec sha256sum {} \;
+          df -h /
+
+      - name: Upload APFS
+        if: (inputs.stage == 'userland' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/userland/*.apfs') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: userland-apfs
+          path: work/hackios-xnu-kernel/userland/*.apfs
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Final state
+        if: always()
+        run: |
+          df -h /
+          du -sh work 2>/dev/null || true
+          find work \( -name "*.apfs" -o -name "mach.development.bcm2837" \) 2>/dev/null | head -20
