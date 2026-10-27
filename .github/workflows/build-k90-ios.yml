@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - kernel
+          - loader
           - userland
           - all
 
@@ -154,7 +155,7 @@ jobs:
           find . -name "mach.development.bcm2837" -exec sha256sum {} \;
 
       - name: Build xnuloader (QEMU loader)
-        if: inputs.stage == 'kernel' || inputs.stage == 'all'
+        if: inputs.stage == 'loader' || inputs.stage == 'all'
         timeout-minutes: 20
         working-directory: work/hackios-xnu-kernel
         run: |
@@ -175,7 +176,7 @@ jobs:
           find . -name "loader*.efi" -exec sha256sum {} \;
 
       - name: Upload loader
-        if: (inputs.stage == 'kernel' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnuloader/*.efi') != ''
+        if: (inputs.stage == 'loader' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnuloader/*.efi') != ''
         uses: actions/upload-artifact@v4
         with:
           name: xnuloader-efi
