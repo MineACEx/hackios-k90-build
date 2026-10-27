@@ -29,7 +29,8 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          large-packages: true
+          # large-packages 会连 llvm/clang 一起删掉，构建需要它们，必须关掉
+          large-packages: false
           docker-images: true
           swap-storage: false
 
@@ -46,20 +47,19 @@ jobs:
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git curl ca-certificates tar xz-utils make file unzip zip binutils patch cpio
 
-      - name: Install deps (toolchain, minimal)
-        timeout-minutes: 10
+      - name: Install deps (toolchain)
+        timeout-minutes: 18
         run: |
-          # runner 预装 clang16/17/18 + llvm，不重复安装大包
+          # 小包一批
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             python3 python3-pip python-is-python3 perl flex bison m4 \
             autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 \
-            uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4 || {
-              echo "apt install failed, retry once"; sleep 5;
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                python3 python3-pip python-is-python3 perl flex bison m4 \
-                autoconf automake libtool pkg-config gawk zstd libzstd-dev bzip2 \
-                uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4;
-            }
+            uuid-dev libssl-dev libncurses-dev device-tree-compiler p7zip-full lz4 || true
+          # clang/lld 单独一批，失败重试
+          for i in 1 2 3; do
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang lld && break
+            echo "clang/lld install attempt $i failed, retry"; sleep 8
+          done
 
       - name: Show toolchain versions
         run: |
@@ -85,7 +85,9 @@ jobs:
       - name: Install theos
         timeout-minutes: 12
         run: |
-          git clone --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          export THEOS="$HOME/theos"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          git clone --depth 1 https://github.com/theos/theos.git "$THEOS"
           mkdir -p "$HOME/theos/toolchain"
           curl -sL --fail --retry 3 \
             https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
@@ -93,7 +95,8 @@ jobs:
           ls -la /tmp/iostc.tar.xz
           tar -xJf /tmp/iostc.tar.xz -C "$HOME/theos/toolchain/"
           rm -f /tmp/iostc.tar.xz
-          "$HOME/theos/bin/install-sdk" iPhoneOS16.5
+          export THEOS="$HOME/theos"
+          "$THEOS/bin/install-sdk" iPhoneOS16.5
 
       - name: Verify theos
         run: |
