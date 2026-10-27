@@ -1,0 +1,149 @@
+name: build-k90-ios
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "构建阶段"
+        required: true
+        default: "kernel"
+        type: choice
+        options:
+          - kernel
+          - userland
+          - all
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: 腾出磁盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: 记录初始磁盘
+        run: |
+          df -h /
+          free -h
+          nproc
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git curl ca-certificates tar xz-utils make clang lld llvm \
+            python3 python3-pip python-is-python3 perl flex bison m4 \
+            autoconf automake libtool pkg-config gawk file unzip zstd \
+            libzstd-dev bzip2 zip binutils uuid-dev libssl-dev libxml2-dev \
+            libbz2-dev liblzma-dev libncurses-dev device-tree-compiler \
+            p7zip-full lz4 cpio bsdextrautils patch
+
+      - name: 克隆 K90 工作区（含子模块）
+        run: |
+          git clone --recurse-submodules \
+            https://github.com/iola1999/hackios-redmi-k90-annibale.git work
+          cd work
+          git submodule status
+          ls -la
+
+      - name: 安装 theos 与 iOS 工具链
+        run: |
+          # xnu-env.sh 默认 THEOS=$HOME/theos，装到此处即可自动对上
+          git clone --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/toolchain"
+          curl -sL --fail \
+            https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            -o /tmp/iostc.tar.xz
+          ls -la /tmp/iostc.tar.xz
+          tar -xJf /tmp/iostc.tar.xz -C "$HOME/theos/toolchain/"
+          "$HOME/theos/bin/install-sdk" iPhoneOS16.5
+          rm -f /tmp/iostc.tar.xz
+
+      - name: 校验工具链
+        run: |
+          echo "=== theos ==="
+          ls "$HOME/theos" || exit 1
+          echo "=== toolchain ==="
+          ls "$HOME/theos/toolchain/linux/iphone/bin/" 2>/dev/null | head -20 || echo "NO linux/iphone/bin"
+          echo "=== SDK ==="
+          ls "$HOME/theos/sdks/" || exit 1
+          echo "=== ld64 能否执行 ==="
+          "$HOME/theos/toolchain/linux/iphone/bin/ld64" --version 2>&1 | head -3 || echo "ld64 FAILED"
+
+      - name: 准备构建树（setup）
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          bash xnu/apply.sh
+          bash xnu-deps/setup.sh
+
+      - name: 构建 XNU 内核
+        if: inputs.stage == 'kernel' || inputs.stage == 'all'
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          bash xnu-build.sh -j4 BUILD_DSYM=0 KEXT_CREATE_SYMBOL_SET=/bin/true
+          echo "=== 产物 ==="
+          find . -name "mach.development.bcm2837" -exec ls -la {} \;
+          find . -name "mach.development.bcm2837" -exec sha256sum {} \;
+
+      - name: 上传内核
+        if: (inputs.stage == 'kernel' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-mach-bcm2837
+          path: work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: 合并 userland overlay（关键前置）
+        if: inputs.stage == 'userland' || inputs.stage == 'all'
+        working-directory: work/hackios-xnu-kernel
+        env:
+          USERLAND_URL: https://github.com/iola1999/hackios-xnu-userland.git
+          USERLAND_REF: k90-port
+        run: |
+          # userland/build.sh 位于 overlay 中，必须先由 setup.sh 收进构建树
+          bash common/setup.sh
+          echo "=== overlay 是否就位 ==="
+          ls -la userland/build.sh || { echo "userland/build.sh 缺失"; exit 1; }
+
+      - name: 构建 userland 与 APFS 镜像
+        if: inputs.stage == 'userland' || inputs.stage == 'all'
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          bash ios165/fetch.sh
+          df -h /
+          bash userland/build.sh
+          echo "=== 产物 ==="
+          ls -la userland/*.apfs 2>/dev/null || echo "no apfs"
+          find . -name "*.apfs" -exec ls -la {} \;
+          find . -name "*.apfs" -exec sha256sum {} \;
+
+      - name: 上传系统盘
+        if: (inputs.stage == 'userland' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/userland/*.apfs') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: userland-apfs
+          path: work/hackios-xnu-kernel/userland/*.apfs
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: 结束状态
+        if: always()
+        run: |
+          echo "=== 磁盘 ==="
+          df -h /
+          echo "=== 工作区 ==="
+          du -sh work 2>/dev/null || true
+          echo "=== 产物汇总 ==="
+          find work -name "*.apfs" -o -name "mach.development.bcm2837" 2>/dev/null | head -20
