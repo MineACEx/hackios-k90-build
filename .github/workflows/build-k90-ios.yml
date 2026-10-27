@@ -64,3 +64,52 @@ jobs:
           git clone --recurse-submodules https://github.com/iola1999/hackios-redmi-k90-annibale.git work
           cd work && git submodule status
           ls -la
+
+      - name: Install theos
+        timeout-minutes: 12
+        run: |
+          git clone --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/toolchain"
+          curl -sL --fail --retry 3 \
+            https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            -o /tmp/iostc.tar.xz
+          ls -la /tmp/iostc.tar.xz
+          tar -xJf /tmp/iostc.tar.xz -C "$HOME/theos/toolchain/"
+          rm -f /tmp/iostc.tar.xz
+          "$HOME/theos/bin/install-sdk" iPhoneOS16.5
+
+      - name: Verify theos
+        run: |
+          echo "=== theos root ==="
+          ls "$HOME/theos"
+          echo "=== toolchain ==="
+          ls "$HOME/theos/toolchain/linux/iphone/bin/" | head -20
+          echo "=== sdk ==="
+          ls "$HOME/theos/sdks/"
+          echo "=== ld64 --version ==="
+          "$HOME/theos/toolchain/linux/iphone/bin/ld64" --version 2>&1 | head -3 || echo "ld64 run failed"
+
+      - name: Prepare xnu tree
+        timeout-minutes: 25
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          bash xnu/apply.sh
+          bash xnu-deps/setup.sh
+
+      - name: Build XNU
+        timeout-minutes: 120
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          bash xnu-build.sh -j4 BUILD_DSYM=0 KEXT_CREATE_SYMBOL_SET=/bin/true
+          echo "=== output ==="
+          find . -name "mach.development.bcm2837" -exec ls -la {} \;
+          find . -name "mach.development.bcm2837" -exec sha256sum {} \;
+
+      - name: Upload kernel
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-mach-bcm2837
+          path: work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837
+          if-no-files-found: warn
+          compression-level: 0
