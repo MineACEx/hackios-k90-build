@@ -17,6 +17,9 @@ concurrency:
   group: k90-build
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -227,6 +230,25 @@ jobs:
           path: work/hackios-xnu-kernel/userland/*.apfs
           if-no-files-found: warn
           compression-level: 0
+
+      - name: Publish to Release (permanent direct links)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-$(date +%Y%m%d-%H%M%S)"
+          echo "tag: $TAG"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "K90 iOS build $TAG" \
+            --notes "stage=${{ inputs.stage }}  commit=$GITHUB_SHA" || true
+          # 收集产物
+          for f in work/hackios-xnu-kernel/xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837 \
+                   work/hackios-xnu-kernel/xnuloader/*.efi \
+                   work/hackios-xnu-kernel/userland/*.apfs; do
+            [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY" --clobber && echo "uploaded $f"
+          done
+          echo "=== release assets ==="
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)  \(.size)"'
 
       - name: Final state
         if: always()
