@@ -158,11 +158,18 @@ jobs:
         timeout-minutes: 20
         working-directory: work/hackios-xnu-kernel
         run: |
-          echo "=== lld-link 可用性 ==="
-          command -v lld-link || echo "no lld-link in PATH"
-          ls /usr/lib/llvm-*/bin/lld-link 2>/dev/null | head -3 || true
+          # lld-link 装在 /usr/lib/llvm-NN/bin，不在默认 PATH
+          LLD_DIR=$(dirname "$(ls /usr/lib/llvm-*/bin/lld-link 2>/dev/null | head -1)")
+          echo "lld dir: $LLD_DIR"
+          if [ -n "$LLD_DIR" ]; then
+            sudo ln -sf "$LLD_DIR/lld-link" /usr/local/bin/lld-link
+            sudo ln -sf "$LLD_DIR/clang" /usr/local/bin/clang 2>/dev/null || true
+          fi
+          export PATH="/usr/local/bin:$PATH"
+          echo "=== lld-link ==="
+          command -v lld-link && lld-link --version
           echo "=== 构建 loader（QEMU 版，无 DIRECT_PHONE_PLAT）==="
-          bash xnuloader/build.sh
+          BUILD_ID=k90-qemu bash xnuloader/build.sh
           echo "=== 产物 ==="
           find . -name "loader*.efi" -exec ls -la {} \;
           find . -name "loader*.efi" -exec sha256sum {} \;
