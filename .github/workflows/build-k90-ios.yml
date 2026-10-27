@@ -150,6 +150,29 @@ jobs:
           find . -name "mach.development.bcm2837" -exec ls -la {} \;
           find . -name "mach.development.bcm2837" -exec sha256sum {} \;
 
+      - name: Build xnuloader (QEMU loader)
+        if: inputs.stage == 'kernel' || inputs.stage == 'all'
+        timeout-minutes: 20
+        working-directory: work/hackios-xnu-kernel
+        run: |
+          echo "=== lld-link 可用性 ==="
+          command -v lld-link || echo "no lld-link in PATH"
+          ls /usr/lib/llvm-*/bin/lld-link 2>/dev/null | head -3 || true
+          echo "=== 构建 loader（QEMU 版，无 DIRECT_PHONE_PLAT）==="
+          bash xnuloader/build.sh
+          echo "=== 产物 ==="
+          find . -name "loader*.efi" -exec ls -la {} \;
+          find . -name "loader*.efi" -exec sha256sum {} \;
+
+      - name: Upload loader
+        if: (inputs.stage == 'kernel' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnuloader/*.efi') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: xnuloader-efi
+          path: work/hackios-xnu-kernel/xnuloader/*.efi
+          if-no-files-found: warn
+          compression-level: 0
+
       - name: Upload kernel
         if: (inputs.stage == 'kernel' || inputs.stage == 'all') && hashFiles('work/hackios-xnu-kernel/xnu-src/**/mach.development.bcm2837') != ''
         uses: actions/upload-artifact@v4
