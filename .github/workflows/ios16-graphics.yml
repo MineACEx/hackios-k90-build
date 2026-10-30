@@ -1,0 +1,57 @@
+name: ios16-graphics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  graphics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm lld bison flex ninja-build python3-venv libzstd-dev zlib1g-dev libtinfo6 libuuid1
+      - name: Fetch pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init work
+          git -C work remote add origin https://github.com/iola1999/hackios-xnu-kernel.git
+          git -C work fetch --depth 1 origin dc49065f8f17c3683925270388eba128f28eab33
+          git -C work checkout --detach FETCH_HEAD
+          git -C work rev-parse HEAD > kernel-source-sha
+          git init userland-source
+          git -C userland-source remote add origin https://github.com/iola1999/hackios-xnu-userland.git
+          git -C userland-source fetch --depth 1 origin 84d90e97083ee987838a87c558b8a6ac90cc8124
+          git -C userland-source checkout --detach FETCH_HEAD
+          git -C userland-source rev-parse HEAD > userland-source-sha
+          git -C userland-source archive HEAD | tar -x -C work
+      - uses: actions/cache@v4
+        with:
+          path: theos
+          key: ios16-theos-304e0799-b61576c0-e402d200-v1
+      - uses: actions/cache@v4
+        with:
+          path: work/xnu-deps/build/mesa
+          key: ios16-mesa26-84d90e97-v1
+      - name: Build only graphics libraries
+        shell: bash
+        run: bash scripts/build-ios16-graphics.sh
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios16-graphics
+          path: graphics-output/
+          if-no-files-found: error
+          compression-level: 6
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios16-graphics-logs
+          path: |
+            logs/
+            work/xnu-deps/build/mesa/*.log
+            work/xnu-deps/build/mesa/build-*/meson-logs/
+          if-no-files-found: ignore
