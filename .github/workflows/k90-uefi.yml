@@ -30,7 +30,7 @@ jobs:
           git -C mu/Binaries sparse-checkout init --cone
           git -C mu/Binaries sparse-checkout set annibale
           git -C mu/Binaries checkout --detach "$binary_commit"
-          git -C mu submodule update --init --depth 1 Common/Mu Common/Mu_OEM_Sample Mu_Basecore Silicium-ACPI Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl
+          git -C mu submodule update --init --recursive --depth 1 Common/Mu Common/Mu_OEM_Sample Mu_Basecore Silicium-ACPI Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl
       - name: Build public K90 UEFI with XNU handoff
         shell: bash
         run: bash scripts/build-k90-uefi.sh
