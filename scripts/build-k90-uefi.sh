@@ -6,6 +6,10 @@ venv/bin/pip install -r mu/pip-requirements.txt pillow
 export PATH="$PWD/venv/bin:$PATH"
 python3 scripts/prepare-k90-uefi.py mu kernel
 cd mu
+# Use the installed NASM instead of fetching the NuGet wrapper through Mono.
+test -f Mu_Basecore/BaseTools/Bin/nasm_ext_dep.yaml
+mv Mu_Basecore/BaseTools/Bin/nasm_ext_dep.yaml Mu_Basecore/BaseTools/Bin/nasm_ext_dep.yaml.disabled
+nasm -v
 python3 build_uefi.py -d annibale 2>&1 | tee ../output/uefi-build.log
 test -s Build/annibalePkg/RELEASE_CLANGPDB/FV/SILICIUM_UEFI.fd
 cd ../kernel
